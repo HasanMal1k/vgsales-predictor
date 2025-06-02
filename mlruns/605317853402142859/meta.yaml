@@ -1,0 +1,6 @@
+artifact_location: mlflow-artifacts:/605317853402142859
+creation_time: 1748844225738
+experiment_id: '605317853402142859'
+last_update_time: 1748844225738
+lifecycle_stage: active
+name: video_game_sales_prediction

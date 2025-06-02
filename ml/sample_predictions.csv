@@ -1,0 +1,6 @@
+Platform,Genre,Publisher,Year,Actual_Sales,Predicted_Sales
+DS,Simulation,Ubisoft,2008.0,0.57,0.3644536834398348
+WiiU,Action,Namco Bandai Games,2014.0,0.07,0.25557091772111984
+PSV,Action,Namco Bandai Games,2015.0,0.19,0.25557091772111984
+PC,Role-Playing,Other,2011.0,0.67,0.12570202015810658
+GBA,Misc,Other,2001.0,0.22,0.23516213258156873
