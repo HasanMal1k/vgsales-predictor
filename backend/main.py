@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 import joblib
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 from pathlib import Path
 import logging
@@ -18,14 +18,14 @@ app = FastAPI(
     title="Video Game Sales Prediction API",
     description="API for predicting video game sales based on platform, genre, publisher, and year",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    docs_url="/",  # Swagger UI at root
+    redoc_url="/redoc"
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # In production, replace with specific origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -38,7 +38,7 @@ model = None
 feature_names = None
 top_publishers = None
 
-# Platform and genre options
+# Get available options for dropdowns
 PLATFORMS = [
     "PS4", "XOne", "PC", "WiiU", "3DS", "PSV", "PS3", "X360", "Wii", "DS",
     "PSP", "PS2", "GBA", "GC", "XB", "PS", "SNES", "N64", "GB", "NES",
@@ -50,7 +50,7 @@ GENRES = [
     "Racing", "Role-Playing", "Shooter", "Simulation", "Sports", "Strategy"
 ]
 
-# Pydantic models
+# Pydantic models for request/response
 class GameFeatures(BaseModel):
     platform: str = Field(..., description="Gaming platform")
     genre: str = Field(..., description="Game genre")
@@ -80,14 +80,21 @@ class HealthResponse(BaseModel):
     available_genres: List[str]
     top_publishers: List[str]
 
+class ModelInfoResponse(BaseModel):
+    model_type: str
+    feature_count: int
+    training_data_size: str
+    available_platforms: List[str]
+    available_genres: List[str]
+    sample_predictions: List[Dict]
+
 def load_model_and_metadata():
     """Load the trained model and associated metadata"""
     global model_pipeline, preprocessor, model, feature_names, top_publishers
     
     try:
         # Get the path to the ml directory
-        current_dir = Path(__file__).parent
-        ml_dir = current_dir.parent / "ml"
+        ml_dir = Path(__file__).parent.parent / "ml"
         
         # Load the complete pipeline
         pipeline_path = ml_dir / "model_pipeline.pkl"
@@ -97,51 +104,89 @@ def load_model_and_metadata():
             model = model_pipeline['model']
             feature_names = model_pipeline['feature_names']
             top_publishers = model_pipeline['top_publishers']
-            logger.info("Model pipeline loaded successfully")
         else:
-            # Default values if model doesn't exist
-            logger.warning("Model file not found, using default values")
-            top_publishers = ["Nintendo", "Electronic Arts", "Activision", "Sony Computer Entertainment", "Ubisoft"]
+            # Load individual components if pipeline doesn't exist
+            model_path = ml_dir / "model.pkl"
+            preprocessor_path = ml_dir / "preprocessor.pkl"
+            
+            if not model_path.exists():
+                raise FileNotFoundError(f"Model file not found at {model_path}")
+            
+            model = joblib.load(model_path)
+            
+            if preprocessor_path.exists():
+                preprocessor = joblib.load(preprocessor_path)
+                
+            # Load feature names
+            feature_names_path = ml_dir / "feature_names.pkl"
+            if feature_names_path.exists():
+                feature_names = joblib.load(feature_names_path)
+                
+            # Load top publishers
+            top_publishers_path = ml_dir / "top_publishers.pkl"
+            if top_publishers_path.exists():
+                top_publishers = joblib.load(top_publishers_path)
+            else:
+                top_publishers = ["Nintendo", "Electronic Arts", "Activision", "Sony Computer Entertainment", "Ubisoft"]
+        
+        logger.info("Model and preprocessor loaded successfully")
+        logger.info(f"Feature names count: {len(feature_names) if feature_names else 'Not loaded'}")
+        logger.info(f"Top publishers count: {len(top_publishers) if top_publishers else 'Not loaded'}")
         
     except Exception as e:
         logger.error(f"Error loading model: {str(e)}")
-        # Set default values
-        top_publishers = ["Nintendo", "Electronic Arts", "Activision", "Sony Computer Entertainment", "Ubisoft"]
+        raise
 
 # Load model on startup
 @app.on_event("startup")
 async def startup_event():
     load_model_and_metadata()
 
-@app.get("/api/health", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
     return HealthResponse(
-        status="healthy" if model is not None else "partial",
+        status="healthy" if model is not None else "unhealthy",
         model_loaded=model is not None,
         available_platforms=PLATFORMS,
         available_genres=GENRES,
         top_publishers=top_publishers or []
     )
 
-@app.post("/api/predict", response_model=PredictionResponse)
-async def predict_sales(features: GameFeatures):
-    """Predict video game sales based on platform, genre, publisher, and year"""
+@app.get("/model-info", response_model=ModelInfoResponse)
+async def get_model_info():
+    """Get information about the loaded model"""
+    if model is None:
+        raise HTTPException(status_code=500, detail="Model not loaded")
     
-    # If model is not loaded, return a mock prediction
+    # Load sample predictions if available
+    sample_predictions = []
+    try:
+        ml_dir = Path(__file__).parent.parent / "ml"
+        sample_path = ml_dir / "sample_predictions.csv"
+        if sample_path.exists():
+            import pandas as pd
+            sample_df = pd.read_csv(sample_path)
+            sample_predictions = sample_df.head(3).to_dict('records')
+    except Exception as e:
+        logger.warning(f"Could not load sample predictions: {e}")
+    
+    return ModelInfoResponse(
+        model_type="Random Forest Regressor",
+        feature_count=len(feature_names) if feature_names else 0,
+        training_data_size="~16,000 video games",
+        available_platforms=PLATFORMS,
+        available_genres=GENRES,
+        sample_predictions=sample_predictions
+    )
+
+@app.post("/predict", response_model=PredictionResponse)
+async def predict_sales(features: GameFeatures):
+    """
+    Predict video game sales based on platform, genre, publisher, and year
+    """
     if model is None or preprocessor is None:
-        logger.warning("Model not loaded, returning mock prediction")
-        return PredictionResponse(
-            predicted_sales=2.5,
-            prediction_range={"lower_bound": 1.8, "upper_bound": 3.2},
-            input_features={
-                "platform": features.platform,
-                "genre": features.genre,
-                "publisher": features.publisher,
-                "year": features.year
-            },
-            confidence_level="Mock"
-        )
+        raise HTTPException(status_code=500, detail="Model or preprocessor not loaded")
     
     try:
         # Prepare input data
@@ -158,17 +203,21 @@ async def predict_sales(features: GameFeatures):
         
         # Validate inputs
         if features.platform not in PLATFORMS:
-            raise HTTPException(status_code=400, detail=f"Invalid platform. Must be one of: {', '.join(PLATFORMS[:10])}...")
+            raise HTTPException(status_code=400, detail=f"Invalid platform. Must be one of: {', '.join(PLATFORMS)}")
         
         if features.genre not in GENRES:
             raise HTTPException(status_code=400, detail=f"Invalid genre. Must be one of: {', '.join(GENRES)}")
         
-        # Preprocess and predict
+        # Preprocess the data
         input_processed = preprocessor.transform(input_data)
+        
+        # Make prediction
         prediction = model.predict(input_processed)[0]
+        
+        # Ensure prediction is non-negative
         prediction = max(0, prediction)
         
-        # Create confidence ranges
+        # Create confidence ranges (rough estimation based on typical model uncertainty)
         lower_bound = max(0, prediction * 0.7)
         upper_bound = prediction * 1.3
         
@@ -179,6 +228,8 @@ async def predict_sales(features: GameFeatures):
             confidence = "Medium"
         else:
             confidence = "Low"
+        
+        logger.info(f"Prediction made: {prediction:.2f}M for {features.platform} {features.genre} game by {publisher} in {features.year}")
         
         return PredictionResponse(
             predicted_sales=round(prediction, 2),
@@ -199,31 +250,31 @@ async def predict_sales(features: GameFeatures):
         logger.error(f"Prediction error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
-@app.get("/api/platforms")
+@app.get("/platforms")
 async def get_platforms():
     """Get list of available platforms"""
     return {"platforms": PLATFORMS}
 
-@app.get("/api/genres")
+@app.get("/genres")
 async def get_genres():
     """Get list of available genres"""
     return {"genres": GENRES}
 
-@app.get("/api/publishers")
+@app.get("/publishers")
 async def get_publishers():
     """Get list of top publishers"""
     return {"publishers": top_publishers or []}
 
-@app.get("/api")
-async def api_root():
-    """API root endpoint"""
+@app.get("/")
+async def root():
+    """Root endpoint - redirects to docs"""
     return {
         "message": "Video Game Sales Prediction API",
-        "docs": "/api/docs",
-        "health": "/api/health",
-        "predict": "/api/predict"
+        "docs": "/docs",
+        "health": "/health",
+        "predict": "/predict"
     }
 
-# For Vercel
-from mangum import Mangum
-handler = Mangum(app)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

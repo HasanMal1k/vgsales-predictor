@@ -1,108 +1,66 @@
-# Video Game Sales Prediction Model Training with MLflow
-# This notebook trains a model to predict video game sales
-
+# Simplified Video Game Sales Prediction Model Training (No MLflow)
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
 import joblib
-import mlflow
-import mlflow.sklearn
 from datetime import datetime
 import os
-import matplotlib.pyplot as plt
-import seaborn as sns
 
-# Set MLflow tracking URI
-mlflow.set_tracking_uri("http://localhost:5000")
-mlflow.set_experiment("video_game_sales_prediction")
+def main():
+    print("Loading Video Game Sales dataset...")
+    df = pd.read_csv('../vgsales.csv')
 
-# Load the dataset
-print("Loading Video Game Sales dataset...")
-df = pd.read_csv('../vgsales.csv')
+    print(f"Dataset shape: {df.shape}")
+    print(f"Columns: {df.columns.tolist()}")
 
-print(f"Dataset shape: {df.shape}")
-print(f"Columns: {df.columns.tolist()}")
+    # Data preprocessing
+    print("\nData Preprocessing...")
+    df_clean = df.dropna()
+    print(f"Shape after removing NaN: {df_clean.shape}")
 
-# Display basic info
-print("\nDataset Info:")
-print(df.info())
-print("\nFirst 5 rows:")
-print(df.head())
+    # Define features and target
+    features = ['Platform', 'Genre', 'Publisher', 'Year']
+    target = 'Global_Sales'
 
-# Data preprocessing
-print("\nData Preprocessing...")
+    X = df_clean[features].copy()
+    y = df_clean[target].copy()
 
-# Remove rows with missing values
-df_clean = df.dropna()
-print(f"Shape after removing NaN: {df_clean.shape}")
+    # For publishers, keep only top publishers to avoid overfitting
+    top_publishers = X['Publisher'].value_counts().head(20).index
+    X['Publisher'] = X['Publisher'].apply(lambda x: x if x in top_publishers else 'Other')
 
-# Define features and target
-# We'll predict Global_Sales based on Platform, Genre, Publisher, Year
-features = ['Platform', 'Genre', 'Publisher', 'Year']
-target = 'Global_Sales'
+    print(f"Publishers after grouping: {X['Publisher'].nunique()}")
 
-X = df_clean[features].copy()
-y = df_clean[target].copy()
+    # Split the data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
-print(f"Features shape: {X.shape}")
-print(f"Target shape: {y.shape}")
+    print(f"\nTraining set size: {X_train.shape[0]}")
+    print(f"Test set size: {X_test.shape[0]}")
 
-# Analyze categorical features
-print(f"\nCategorical features analysis:")
-print(f"Unique Platforms: {X['Platform'].nunique()}")
-print(f"Unique Genres: {X['Genre'].nunique()}")
-print(f"Unique Publishers: {X['Publisher'].nunique()}")
+    # Create preprocessing pipeline
+    categorical_features = ['Platform', 'Genre', 'Publisher']
+    numerical_features = ['Year']
 
-# For publishers, we'll keep only top publishers to avoid overfitting
-top_publishers = X['Publisher'].value_counts().head(20).index
-X['Publisher'] = X['Publisher'].apply(lambda x: x if x in top_publishers else 'Other')
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', StandardScaler(), numerical_features),
+            ('cat', OneHotEncoder(drop='first', sparse_output=False), categorical_features)
+        ]
+    )
 
-print(f"Publishers after grouping: {X['Publisher'].nunique()}")
-
-# Split the data
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
-
-print(f"\nTraining set size: {X_train.shape[0]}")
-print(f"Test set size: {X_test.shape[0]}")
-
-# Create preprocessing pipeline
-categorical_features = ['Platform', 'Genre', 'Publisher']
-numerical_features = ['Year']
-
-preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', StandardScaler(), numerical_features),
-        ('cat', OneHotEncoder(drop='first', sparse_output=False), categorical_features)
-    ]
-)
-
-# Start MLflow run
-with mlflow.start_run() as run:
-    print(f"\nMLflow Run ID: {run.info.run_id}")
-    
     # Model parameters
     n_estimators = 100
     max_depth = 10
     min_samples_split = 5
     min_samples_leaf = 2
     random_state = 42
-    
-    # Log parameters
-    mlflow.log_param("n_estimators", n_estimators)
-    mlflow.log_param("max_depth", max_depth)
-    mlflow.log_param("min_samples_split", min_samples_split)
-    mlflow.log_param("min_samples_leaf", min_samples_leaf)
-    mlflow.log_param("random_state", random_state)
-    mlflow.log_param("test_size", 0.2)
-    mlflow.log_param("dataset_size", len(X))
-    mlflow.log_param("top_publishers_count", 20)
     
     # Preprocess the data
     print("Preprocessing data...")
@@ -140,20 +98,6 @@ with mlflow.start_run() as run:
     train_r2 = r2_score(y_train, y_pred_train)
     test_r2 = r2_score(y_test, y_pred_test)
     
-    # Log metrics
-    mlflow.log_metric("train_mse", train_mse)
-    mlflow.log_metric("test_mse", test_mse)
-    mlflow.log_metric("train_rmse", train_rmse)
-    mlflow.log_metric("test_rmse", test_rmse)
-    mlflow.log_metric("train_mae", train_mae)
-    mlflow.log_metric("test_mae", test_mae)
-    mlflow.log_metric("train_r2", train_r2)
-    mlflow.log_metric("test_r2", test_r2)
-    mlflow.log_metric("training_time_seconds", training_time)
-    
-    # Log model
-    mlflow.sklearn.log_model(model, "random_forest_model")
-    
     # Print results
     print(f"\nModel Performance:")
     print(f"Training RMSE: {train_rmse:.4f}")
@@ -176,7 +120,7 @@ with mlflow.start_run() as run:
     print(feature_importance.head(15))
     
     # Save model and preprocessor
-    os.makedirs('../ml', exist_ok=True)
+    print("\nSaving model files...")
     
     # Save the full pipeline (preprocessor + model)
     joblib.dump({
@@ -184,15 +128,15 @@ with mlflow.start_run() as run:
         'model': model,
         'feature_names': feature_names,
         'top_publishers': list(top_publishers)
-    }, '../ml/model_pipeline.pkl')
+    }, 'model_pipeline.pkl')
     
     # Also save individual components for API
-    joblib.dump(model, '../ml/model.pkl')
-    joblib.dump(preprocessor, '../ml/preprocessor.pkl')
-    joblib.dump(feature_names, '../ml/feature_names.pkl')
-    joblib.dump(list(top_publishers), '../ml/top_publishers.pkl')
+    joblib.dump(model, 'model.pkl')
+    joblib.dump(preprocessor, 'preprocessor.pkl')
+    joblib.dump(feature_names, 'feature_names.pkl')
+    joblib.dump(list(top_publishers), 'top_publishers.pkl')
     
-    print(f"\nModel pipeline saved to: ../ml/model_pipeline.pkl")
+    print(f"Model pipeline saved to: model_pipeline.pkl")
     
     # Save sample predictions for testing
     sample_data = X_test.head(5).copy()
@@ -211,23 +155,10 @@ with mlflow.start_run() as run:
     print(f"\nSample Predictions:")
     print(sample_results)
     
-    sample_results.to_csv('../ml/sample_predictions.csv', index=False)
+    sample_results.to_csv('sample_predictions.csv', index=False)
     
-    print(f"\nMLflow tracking URI: {mlflow.get_tracking_uri()}")
-    print(f"Experiment ID: {mlflow.active_run().info.experiment_id}")
-    print(f"Run ID: {run.info.run_id}")
+    print("\nTraining completed successfully!")
+    print("Model files saved. You can now start the API server.")
 
-print("\nTraining completed successfully!")
-print("Next steps:")
-print("1. Check MLflow UI at http://localhost:5000")
-print("2. Run the FastAPI backend")
-print("3. Start the frontend application")
-
-# Basic analysis
-print(f"\nDataset Summary:")
-print(f"- Total games: {len(df_clean)}")
-print(f"- Date range: {df_clean['Year'].min():.0f} - {df_clean['Year'].max():.0f}")
-print(f"- Average global sales: {df_clean['Global_Sales'].mean():.2f} million")
-print(f"- Top selling game: {df_clean.loc[df_clean['Global_Sales'].idxmax(), 'Name']} ({df_clean['Global_Sales'].max():.2f}M)")
-print(f"- Most common platform: {df_clean['Platform'].mode()[0]}")
-print(f"- Most common genre: {df_clean['Genre'].mode()[0]}")
+if __name__ == "__main__":
+    main()  
